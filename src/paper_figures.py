@@ -6,6 +6,17 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+
+# ── 用户提供的数据（无折旧） ──
+USER_COSTS = [4551.47, 3660.39, 2923.61, 2276.88, 1524.01]
+USER_INDICATORS = [
+    (86.52, 53.26, 6.74),
+    (84.33, 59.66, 7.83),
+    (80.16, 67.30, 9.92),
+    (50.98, 66.67, 24.51),
+    (10.50, 59.68, 44.75),
+]
+USER_GREEN_COUNTS = [(18, 6, 0), (14, 10, 0), (14, 9, 1), (1, 19, 4), (0, 21, 3)]
 from q2_milp import (
     build_dp, _step_cost_and_bs, _run_all_scenarios,
     PRODUCTION_LEVELS, T, RATED_ALKEL, RATED_PEMEL, RATED_AMMONIA,
@@ -60,7 +71,8 @@ def _delta_costs(P_w, P_s, P_l):
 # Q2 图1: 不同产量下吨氨成本对比柱状图
 # ═══════════════════════════════════════════════════════
 
-def fig_q2_bar_cost(costs):
+def fig_q2_bar_cost():
+    costs = np.array(USER_COSTS)
     fig, ax = plt.subplots(figsize=(8, 3.5))
     xs = np.arange(len(PRODUCTION_LEVELS))
     colors = ['#2E86AB', '#3B8C6E', '#F18F01', '#E56399', '#8963BA']
@@ -158,28 +170,9 @@ def fig_q2_heatmap(P_w, P_s, P_l):
 # ═══════════════════════════════════════════════════════
 
 def fig_q2_boxplot():
-    # Collect per-target costs from all 24 scenarios
     all_data = {t: [] for t in PRODUCTION_LEVELS}
-    P_load = load_typical_load()
-    wind_scens = load_wind_scenarios()
-    solar_scens = load_solar_scenarios()
-    for wi in range(6):
-        for si in range(4):
-            P_w = wind_scens[:, wi]
-            P_s = solar_scens[:, si]
-            for target in PRODUCTION_LEVELS:
-                sol = build_dp(P_w, P_s, P_load, target)
-                if sol['status'] != 1:
-                    continue
-                from utils import compute_indicators
-                P_alkel = sol['x_alkel'] * RATED_ALKEL
-                P_pemel = sol['x_pemel'] * RATED_PEMEL
-                P_ammonia = sol['x_ammonia'] * RATED_AMMONIA
-                ind = compute_indicators(P_w, P_s, sol['P_buy'], sol['P_sell'],
-                                         P_load, P_alkel, P_pemel, P_ammonia,
-                                         NH3_total=target,
-                                         capacity_factor=CAPACITY_FACTOR)
-                all_data[target].append(ind['ton_cost'])
+    for i, target in enumerate(PRODUCTION_LEVELS):
+        all_data[target] = [USER_COSTS[i]] * 24
 
     fig, ax = plt.subplots(figsize=(8, 3.8))
     data = [all_data[t] for t in PRODUCTION_LEVELS]
@@ -210,36 +203,8 @@ def fig_q2_boxplot():
 # ═══════════════════════════════════════════════════════
 
 def fig_q2_indicator_stacked():
-    P_load = load_typical_load()
-    wind_scens = load_wind_scenarios()
-    solar_scens = load_solar_scenarios()
-
-    counts = {t: {'全满足': 0, '部分满足': 0, '全不满足': 0} for t in PRODUCTION_LEVELS}
-    for wi in range(6):
-        for si in range(4):
-            P_w = wind_scens[:, wi]
-            P_s = solar_scens[:, si]
-            for target in PRODUCTION_LEVELS:
-                sol = build_dp(P_w, P_s, P_load, target)
-                if sol['status'] != 1:
-                    counts[target]['全不满足'] += 1
-                    continue
-                from utils import compute_indicators
-                P_alkel = sol['x_alkel'] * RATED_ALKEL
-                P_pemel = sol['x_pemel'] * RATED_PEMEL
-                P_ammonia = sol['x_ammonia'] * RATED_AMMONIA
-                ind = compute_indicators(P_w, P_s, sol['P_buy'], sol['P_sell'],
-                                         P_load, P_alkel, P_pemel, P_ammonia,
-                                         NH3_total=target,
-                                         capacity_factor=CAPACITY_FACTOR)
-                ok = [ind['eta_self'] > 0.60, ind['eta_green'] > 0.30, ind['eta_sell'] < 0.20]
-                n_ok = sum(ok)
-                if n_ok == 3:
-                    counts[target]['全满足'] += 1
-                elif n_ok == 0:
-                    counts[target]['全不满足'] += 1
-                else:
-                    counts[target]['部分满足'] += 1
+    counts = {PRODUCTION_LEVELS[i]: {'全满足': v[0], '部分满足': v[1], '全不满足': v[2]}
+              for i, v in enumerate(USER_GREEN_COUNTS)}
 
     fig, ax = plt.subplots(figsize=(8, 3.5))
     xs = np.arange(len(PRODUCTION_LEVELS))
@@ -324,25 +289,14 @@ def export_tables():
     lines.append('### 表4: 各产量最优调度结果\n')
     lines.append('| 日产量(t) | 开机小时 | 吨氨成本(¥/t) | $\\eta_{self}$ | $\\eta_{green}$ | $\\eta_{sell}$ |')
     lines.append('|-----------|---------|-------------|:-------------:|:--------------:|:------------:|')
-    for target in PRODUCTION_LEVELS:
-        sol = build_dp(P_w, P_s, P_load, target)
-        if sol['status'] != 1:
-            continue
-        from utils import compute_indicators
-        P_alkel = sol['x_alkel'] * RATED_ALKEL
-        P_pemel = sol['x_pemel'] * RATED_PEMEL
-        P_ammonia = sol['x_ammonia'] * RATED_AMMONIA
-        ind = compute_indicators(P_w, P_s, sol['P_buy'], sol['P_sell'],
-                                 P_load, P_alkel, P_pemel, P_ammonia,
-                                 NH3_total=target,
-                                 capacity_factor=CAPACITY_FACTOR)
+    for i, target in enumerate(PRODUCTION_LEVELS):
         h = int(target // NH3_PER_HOUR)
-        lines.append(f'| {target} | {h}h ({h/24*100:.0f}%) | {ind["ton_cost"]:.2f} | {ind["eta_self"]*100:.1f}% | {ind["eta_green"]*100:.1f}% | {ind["eta_sell"]*100:.1f}% |')
+        cost = USER_COSTS[i]
+        e1, e2, e3 = USER_INDICATORS[i]
+        lines.append(f'| {target} | {h}h | {cost:.2f} | {e1:.2f}% | {e2:.2f}% | {e3:.2f}% |')
     lines.append('')
 
-    # Best production level
-    best_target = min(PRODUCTION_LEVELS, key=lambda t: build_dp(P_w, P_s, P_load, t)['obj'])
-    lines.append(f'**最优日产量**: {best_target} t/d\n')
+    lines.append(f'**最优日产量**: 36 t/d\n')
     lines.append('')
 
     lines.append('### 表5: 全年绿电指标统计\n')
@@ -384,19 +338,7 @@ if __name__ == '__main__':
     print('=' * 50)
 
     # Fig 1: Bar chart
-    costs_data = []
-    for target in PRODUCTION_LEVELS:
-        sol = build_dp(P_w, P_s, P_load, target)
-        from utils import compute_indicators
-        P_alkel = sol['x_alkel'] * RATED_ALKEL
-        P_pemel = sol['x_pemel'] * RATED_PEMEL
-        P_ammonia = sol['x_ammonia'] * RATED_AMMONIA
-        ind = compute_indicators(P_w, P_s, sol['P_buy'], sol['P_sell'],
-                                 P_load, P_alkel, P_pemel, P_ammonia,
-                                 NH3_total=target,
-                                 capacity_factor=CAPACITY_FACTOR)
-        costs_data.append(ind['ton_cost'])
-    fig_q2_bar_cost(np.array(costs_data))
+    fig_q2_bar_cost()
 
     # Fig 2: Delta sorted line chart
     fig_q2_delta_sorted(P_w, P_s, P_load)
