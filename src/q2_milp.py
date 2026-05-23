@@ -44,19 +44,13 @@ def _step_cost_and_bs(pw, ps, pl, xa, xp, xm, price):
     p_nh3 = xm * RATED_AMMONIA
     bal = pw + ps - pl - p_alkel - p_pemel - p_nh3
     om = p_alkel * 100 + p_pemel * 150 + p_nh3 * 2
-    P_sell_max = pw + ps
 
     if bal >= 0:
         P_buy = 0.0
         P_sell = bal
     else:
-        deficit = -bal
-        if price < FEED_IN_PRICE - 1e-8:
-            P_buy = deficit + P_sell_max
-            P_sell = P_sell_max
-        else:
-            P_buy = deficit
-            P_sell = 0.0
+        P_buy = -bal
+        P_sell = 0.0
     cost = P_buy * 1000 * price - P_sell * 1000 * FEED_IN_PRICE + om
     return cost, P_buy, P_sell
 
@@ -203,7 +197,6 @@ def plot_q2_figures(P_wind, P_solar, P_load, P_buy, P_sell,
     fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
     ax1 = axes[0, 0]
-    _shade_price(ax1)
     ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.6)
     bottom = P_load.copy()
     if P_alkel.sum() > 0:
@@ -223,7 +216,6 @@ def plot_q2_figures(P_wind, P_solar, P_load, P_buy, P_sell,
     ax1.legend(fontsize=7, ncol=2, loc='upper right')
 
     ax2 = axes[0, 1]
-    _shade_price(ax2)
     ax2.fill_between(t, 0, P_wind, label='风电', color='#2E86AB', alpha=0.6)
     ax2.fill_between(t, P_wind, P_total_gen, label='光伏', color='#F18F01', alpha=0.6)
     ax2.plot(t, P_total_gen, '--', color='#3B8C6E', linewidth=1.5, label='总发电')
@@ -242,7 +234,6 @@ def plot_q2_figures(P_wind, P_solar, P_load, P_buy, P_sell,
     ax3.legend(fontsize=7, loc='upper right')
 
     ax4 = axes[1, 1]
-    _shade_price(ax4)
     ax4.bar(t - 0.15, P_buy, width=0.3, color='#E56399', alpha=0.8, label='购电')
     ax4.bar(t + 0.15, P_sell, width=0.3, color='#88CC88', alpha=0.8, label='售电')
     _finish_ax(ax4, '功率 (MW)', '图4: 购电与售电功率')

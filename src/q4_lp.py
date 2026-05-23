@@ -8,7 +8,6 @@ from pulp import LpProblem, LpMaximize, LpVariable, lpSum, PULP_CBC_CMD, value
 from utils import (
     load_typical_load, load_wind_scenarios, load_solar_scenarios,
     compute_indicators, RESULTS_DIR, save_text_output, TeeStream,
-    get_price, FEED_IN_PRICE, TOU_SCHEDULE,
 )
 
 T = 24
@@ -508,17 +507,13 @@ def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
 
     # ── 图1: 负荷分解 ──
     ax1 = axes[0, 0]
-    for tt in range(24):
-        p = TOU_SCHEDULE[tt]
-        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
-        ax1.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
-    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.6)
+    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.5)
     bottom = P_load.copy()
-    ax1.fill_between(t, bottom, bottom + sol['P_alkel'], label='ALKEL', color='#8963BA', alpha=0.5)
+    ax1.fill_between(t, bottom, bottom + sol['P_alkel'], label='ALKEL', color='#8963BA', alpha=0.4)
     bottom += sol['P_alkel']
-    ax1.fill_between(t, bottom, bottom + sol['P_pemel'], label='PEMEL', color='#E56399', alpha=0.5)
+    ax1.fill_between(t, bottom, bottom + sol['P_pemel'], label='PEMEL', color='#E56399', alpha=0.4)
     bottom += sol['P_pemel']
-    ax1.fill_between(t, bottom, bottom + sol['P_ammonia'], label='合成氨', color='#7F7F7F', alpha=0.5)
+    ax1.fill_between(t, bottom, bottom + sol['P_ammonia'], label='合成氨', color='#7F7F7F', alpha=0.4)
     ax1.plot(t, P_total_load, 'k-', linewidth=1.5, label='总负荷')
     ax1.set_xlabel('时段 (h)')
     ax1.set_ylabel('功率 (MW)')
@@ -529,15 +524,13 @@ def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
     ax1.set_xlim(-0.5, 23.5)
     ax1.legend(fontsize=7, ncol=2, loc='upper right')
 
-    # ── 图2: 发电分解 ──
+    # ── 图2: 发电分解 (独立曲线) ──
     ax2 = axes[0, 1]
-    for tt in range(24):
-        p = TOU_SCHEDULE[tt]
-        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
-        ax2.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
-    ax2.fill_between(t, 0, P_w, label='风电', color='#2E86AB', alpha=0.6)
-    ax2.fill_between(t, P_w, P_total_gen, label='光伏', color='#F18F01', alpha=0.6)
-    ax2.plot(t, P_total_gen, '--', color='#3B8C6E', linewidth=1.5, label='总发电')
+    ax2.fill_between(t, 0, P_w, color='#2E86AB', alpha=0.12)
+    ax2.fill_between(t, 0, P_s, color='#F18F01', alpha=0.12)
+    ax2.plot(t, P_w, 'o-', color='#2E86AB', linewidth=1.5, markersize=4, label='风电')
+    ax2.plot(t, P_s, 's-', color='#F18F01', linewidth=1.5, markersize=4, label='光伏')
+    ax2.plot(t, P_total_gen, '^--', color='#C73E1D', linewidth=2, markersize=5, label='总发电')
     ax2.set_xlabel('时段 (h)')
     ax2.set_ylabel('功率 (MW)')
     ax2.set_title('图2: 发电分解', fontsize=11, fontweight='bold')
@@ -549,11 +542,6 @@ def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
 
     # ── 图3: 供需对比 + 弃电 ──
     ax3 = axes[1, 0]
-    for tt in range(24):
-        p = TOU_SCHEDULE[tt]
-        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
-        ax3.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
-    # With storage: net load = load + charge - discharge
     if has_storage:
         P_net_re = P_w + P_s + sol['P_discharge'] - sol['P_charge']
         net_label = '总发电+放电-充电'
@@ -562,7 +550,6 @@ def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
         net_label = '总发电'
     ax3.plot(t, P_total_load, 's-', color='#C73E1D', linewidth=2, markersize=4, label='总负荷')
     ax3.plot(t, P_net_re, 'o-', color='#3B8C6E', linewidth=2, markersize=4, label=net_label)
-    # Curtailment area
     curtail = sol['curtail']
     ax3.fill_between(t, 0, curtail, where=(curtail > 0), color='orange', alpha=0.15, label='弃电')
     ax3.set_xlabel('时段 (h)')
@@ -576,10 +563,6 @@ def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
 
     # ── 图4: 储能调度 (或弃电明细) ──
     ax4 = axes[1, 1]
-    for tt in range(24):
-        p = TOU_SCHEDULE[tt]
-        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
-        ax4.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
     if has_storage:
         ax4.bar(t - 0.2, sol['P_charge'], width=0.35, color='#2E86AB', alpha=0.7, label='充电')
         ax4.bar(t + 0.2, sol['P_discharge'], width=0.35, color='#C73E1D', alpha=0.7, label='放电')
