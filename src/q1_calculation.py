@@ -138,13 +138,18 @@ def solve_q1():
     print(f"  η_sell (上网比例)    = {ind['eta_sell']*100:>5.2f}%  (要求 < 20%)  {'✓' if ok_sell else '✗'}")
 
     # ── 成本 ──
+    alkel_om = ind['E_alkel'] * 100
+    pemel_om = ind['E_pemel'] * 150
+    amm_om = ind['E_ammonia'] * 2
+    total_om = alkel_om + pemel_om + amm_om
     print(f"\n{'─'*50}")
     print("吨氨成本（运营成本，不含设备折旧）")
     print(f"{'─'*50}")
     print(f"  购电费:                      {ind['cost_buy']:>10.2f} ¥")
     print(f"  新能源总发电成本:            {ind['renewable_gen_cost']:>10.2f} ¥")
-    print(f"  电解槽运维费:                {ind['ope_cost']:>10.2f} ¥")
-    print(f"  合成氨运维费:                {ind['E_ammonia']*1000*0.002:>10.2f} ¥")
+    print(f"  碱性电解槽运维费:            {alkel_om:>10.2f} ¥")
+    print(f"  PEM电解槽运维费:             {pemel_om:>10.2f} ¥")
+    print(f"  合成氨运维费:                {amm_om:>10.2f} ¥")
     print(f"  售电收益:                   {ind['rev_sell']:>10.2f} ¥")
     print(f"  ──────────────────────────────")
     print(f"  总运营成本:                  {ind['ton_cost']*36:>10.2f} ¥")

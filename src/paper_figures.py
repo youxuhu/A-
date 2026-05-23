@@ -312,8 +312,12 @@ def export_tables():
     lines.append('|--------|----------|')
     lines.append(f'| 购电费 $C_{{\\text{{buy}}}}$ | {ind["cost_buy"]:.2f} |')
     lines.append(f'| 新能源总发电成本 $C_{{\\text{{gen}}}}$ | {ind["renewable_gen_cost"]:.2f} |')
-    lines.append(f'| 电解槽运维费 | {ind["ope_cost"]:.2f} |')
-    lines.append(f'| 合成氨运维费 | {ind["E_ammonia"]*1000*0.002:.2f} |')
+    alkel_om = ind['E_alkel'] * 100
+    pemel_om = ind['E_pemel'] * 150
+    amm_om = ind['E_ammonia'] * 2
+    lines.append(f'| 碱性电解槽运维费 | {alkel_om:.2f} |')
+    lines.append(f'| PEM电解槽运维费 | {pemel_om:.2f} |')
+    lines.append(f'| 合成氨运维费 | {amm_om:.2f} |')
     lines.append(f'| 售电收益 $R_{{\\text{{sell}}}}$ | -{ind["rev_sell"]:.2f} |')
     lines.append(f'| 总运营成本 $C_{{\\text{{total}}}}$ | {ind["ton_cost"]*36:.2f} |')
     lines.append(f'| **吨氨成本** | **{ind["ton_cost"]:.2f}** 元/吨 |')
