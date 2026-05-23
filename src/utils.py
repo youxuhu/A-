@@ -123,7 +123,9 @@ def compute_indicators(P_wind: np.ndarray, P_solar: np.ndarray,
                        P_load: np.ndarray, P_alkel: np.ndarray,
                        P_pemel: np.ndarray, P_ammonia: np.ndarray,
                        NH3_total: float = 36.0,
-                       capacity_factor: float = 1.0) -> dict:
+                       capacity_factor: float = 1.0,
+                       include_depreciation: bool = True,
+                       include_renewable_cost: bool = False) -> dict:
     E_wind = P_wind.sum()
     E_solar = P_solar.sum()
     E_renewable = E_wind + E_solar
@@ -142,17 +144,22 @@ def compute_indicators(P_wind: np.ndarray, P_solar: np.ndarray,
     cost_buy = np.sum(P_buy * 1000 * get_price_array())
     rev_sell = E_sell * 1000 * FEED_IN_PRICE
 
-    # Depreciation & O&M (all ¥/kWh → ×1000 for MW→kW)
-    invest_alkel = 10 * 1000 * 10000 * capacity_factor  # MW→kW, ¥/kW
+    # Depreciation
+    invest_alkel = 10 * 1000 * 10000 * capacity_factor
     invest_pemel = 10 * 1000 * 10000 * capacity_factor
     invest_ammonia = (AMMONIA_NH3_RATE * H2_PER_NH3 * 1000) * 60000 * capacity_factor
     total_invest = invest_alkel + invest_pemel + invest_ammonia
-    annual_depreciation = total_invest / 30  # 30 year life
-    daily_depreciation = annual_depreciation / 365
+    annual_depreciation = total_invest / 30
+    daily_depreciation = annual_depreciation / 365 if include_depreciation else 0
 
     ope_cost = np.sum(P_alkel * 100 + P_pemel * 150 + P_ammonia * 2)
 
-    total_cost = cost_buy + ope_cost + daily_depreciation - rev_sell
+    # Renewable generation cost (Q1 only)
+    renewable_gen_cost = 0.0
+    if include_renewable_cost:
+        renewable_gen_cost = E_wind * 1000 * 0.15 + E_solar * 1000 * 0.12
+
+    total_cost = cost_buy + ope_cost + daily_depreciation + renewable_gen_cost - rev_sell
     ton_cost = total_cost / NH3_total if NH3_total > 0 else 0
 
     return {
@@ -173,6 +180,7 @@ def compute_indicators(P_wind: np.ndarray, P_solar: np.ndarray,
         'rev_sell': rev_sell,
         'ope_cost': ope_cost,
         'daily_depreciation': daily_depreciation,
+        'renewable_gen_cost': renewable_gen_cost,
         'ton_cost': ton_cost,
     }
 
@@ -267,11 +275,10 @@ def plot_power_curves(P_wind, P_solar, P_load, P_buy, P_sell,
     if ind is not None:
         _annotate_metrics(ax, ind)
 
-    fig.tight_layout()
-    fig.subplots_adjust(bottom=0.18)
+    fig.subplots_adjust(bottom=0.22)
     if save_path:
         save_path = str(RESULTS_DIR / Path(save_path).name)
-        fig.savefig(save_path, dpi=180, bbox_inches='tight')
+        fig.savefig(save_path, dpi=180, bbox_inches='tight', pad_inches=0.3)
         plt.close(fig)
     else:
         plt.show()
@@ -304,7 +311,14 @@ def save_text_output(filename: str, content: str):
 
 def plot_toncost_distribution(costs, title, save_path):
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.hist(costs, bins='auto', edgecolor='white', alpha=0.75, color='#2E86AB')
+    n_bins = min(len(costs) // 2, 10) if len(costs) > 4 else 5
+    n, bins, patches = ax.hist(costs, bins=n_bins, edgecolor='white', alpha=0.75,
+                                color='#2E86AB')
+    # Align x-ticks to bin centers
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    if len(bin_centers) <= 10:
+        ax.set_xticks(bin_centers)
+        ax.set_xticklabels([f'{c:.0f}' for c in bin_centers], rotation=30, fontsize=8)
     mean_val = costs.mean()
     ax.axvline(mean_val, color='#C73E1D', linestyle='--', linewidth=2,
                label=f'均值 = {mean_val:.2f} ¥/t')

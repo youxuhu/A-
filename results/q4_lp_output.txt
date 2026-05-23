@@ -151,3 +151,5 @@ Q4(3): 离网 vs 并网 经济性对比 (72t/d同基准)
   >>> 电网核心价值: 保障72t/d满产 + 允许余电上网回收成本
   >>> 离网放弃电网 = 放弃 11353 t/年产能 (44% 产量损失)
 
+[Saved] /home/revy/A题/results/q4_scn_4_1_storage_0.png
+[Saved] /home/revy/A题/results/q4_scn_4_1_storage_300.png

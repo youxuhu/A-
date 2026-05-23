@@ -1,10 +1,14 @@
 import sys
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from pulp import LpProblem, LpMinimize, LpVariable, lpSum, PULP_CBC_CMD
 from utils import (load_typical_load, load_typical_wind_solar,
                    load_wind_scenarios, load_solar_scenarios,
                    get_price, compute_indicators, plot_power_curves,
-                   plot_toncost_distribution, save_text_output, TeeStream)
+                   plot_toncost_distribution, save_text_output, TeeStream,
+                   RESULTS_DIR, TOU_SCHEDULE)
 
 T = 24
 CAPACITY_FACTOR = 2.0
@@ -72,6 +76,89 @@ def calc_utilization(sol: dict):
     }
 
 
+def _shade_price(ax):
+    for t in range(24):
+        p = TOU_SCHEDULE[t]
+        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
+        ax.axvspan(t - 0.5, t + 0.5, color=c, alpha=0.06, lw=0)
+
+
+def _finish_ax(ax, ylabel, title):
+    ax.set_xlabel('时段 (h)')
+    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=11, fontweight='bold')
+    ax.set_xticks(range(24))
+    ax.set_xticklabels([f'{h}:00' for h in range(24)], rotation=45, fontsize=7)
+    ax.grid(True, alpha=0.25, linestyle=':')
+    ax.set_xlim(-0.5, 23.5)
+
+
+def plot_q2_figures(P_wind, P_solar, P_load, P_buy, P_sell,
+                    P_alkel, P_pemel, P_ammonia, ind, target):
+    t = np.arange(24)
+    P_total_load = P_load + P_alkel + P_pemel + P_ammonia
+    P_total_gen = P_wind + P_solar
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+
+    # ── 图1: 负荷分解 ──
+    ax1 = axes[0, 0]
+    _shade_price(ax1)
+    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.6)
+    bottom = P_load.copy()
+    if P_alkel.sum() > 0:
+        ax1.fill_between(t, bottom, bottom + P_alkel, label='ALKEL', color='#8963BA', alpha=0.5, step='mid')
+        bottom += P_alkel
+    if P_pemel.sum() > 0:
+        ax1.fill_between(t, bottom, bottom + P_pemel, label='PEMEL', color='#E56399', alpha=0.5, step='mid')
+        bottom += P_pemel
+    if P_ammonia.sum() > 0:
+        ax1.fill_between(t, bottom, bottom + P_ammonia, label='合成氨', color='#7F7F7F', alpha=0.5, step='mid')
+    ax1.plot(t, P_total_load, 'k-', linewidth=1.5, label='总负荷', drawstyle='steps-mid')
+    on_h = f"ALKEL={int((P_alkel>0).sum())}h  PEMEL={int((P_pemel>0).sum())}h  NH₃={int((P_ammonia>0).sum())}h"
+    ax1.text(0.98, 0.02, on_h, transform=ax1.transAxes, fontsize=7,
+             ha='right', va='bottom', color='#555555',
+             bbox=dict(facecolor='white', alpha=0.7, pad=2))
+    _finish_ax(ax1, '功率 (MW)', '图1: 负荷分解 (离散 ON/OFF)')
+    ax1.legend(fontsize=7, ncol=2, loc='upper right')
+
+    # ── 图2: 发电分解 ──
+    ax2 = axes[0, 1]
+    _shade_price(ax2)
+    ax2.fill_between(t, 0, P_wind, label='风电', color='#2E86AB', alpha=0.6)
+    ax2.fill_between(t, P_wind, P_total_gen, label='光伏', color='#F18F01', alpha=0.6)
+    ax2.plot(t, P_total_gen, '--', color='#3B8C6E', linewidth=1.5, label='总发电')
+    _finish_ax(ax2, '功率 (MW)', '图2: 发电分解')
+    ax2.legend(fontsize=7, loc='upper right')
+
+    # ── 图3: 供需对比 ──
+    ax3 = axes[1, 0]
+    _shade_price(ax3)
+    ax3.plot(t, P_total_load, 's-', color='#C73E1D', linewidth=2, markersize=4, label='总负荷')
+    ax3.plot(t, P_total_gen, 'o-', color='#3B8C6E', linewidth=2, markersize=4, label='总发电')
+    deficit = np.maximum(0, P_total_load - P_total_gen)
+    surplus = np.maximum(0, P_total_gen - P_total_load)
+    ax3.fill_between(t, 0, deficit, where=(deficit > 0), color='red', alpha=0.12, label='缺电')
+    ax3.fill_between(t, 0, surplus, where=(surplus > 0), color='green', alpha=0.12, label='余电')
+    _finish_ax(ax3, '功率 (MW)', '图3: 总负荷 vs 总发电')
+    ax3.legend(fontsize=7, loc='upper right')
+
+    # ── 图4: 购电与售电 ──
+    ax4 = axes[1, 1]
+    _shade_price(ax4)
+    ax4.bar(t - 0.15, P_buy, width=0.3, color='#E56399', alpha=0.8, label='购电')
+    ax4.bar(t + 0.15, P_sell, width=0.3, color='#88CC88', alpha=0.8, label='售电')
+    _finish_ax(ax4, '功率 (MW)', '图4: 购电与售电功率')
+    ax4.legend(fontsize=7, loc='upper right')
+
+    fig.suptitle(f'问题二(1): 最优离散调度 (氨产量={target}t/d)', fontsize=14, fontweight='bold', y=1.02)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    path = str(RESULTS_DIR / 'q2_typical_optimal.png')
+    fig.savefig(path, dpi=180, bbox_inches='tight', pad_inches=0.3)
+    plt.close(fig)
+    print(f"[Saved] {path}")
+
+
 def solve_q2_typical():
     P_load = load_typical_load()
     P_wind, P_solar = load_typical_wind_solar()
@@ -120,13 +207,10 @@ def solve_q2_typical():
         P_alkel = best_sol['x_alkel'] * RATED_ALKEL
         P_pemel = best_sol['x_pemel'] * RATED_PEMEL
         P_ammonia = best_sol['x_ammonia'] * RATED_AMMONIA
-        plot_power_curves(
+        plot_q2_figures(
             P_wind, P_solar, P_load,
             best_sol['P_buy'], best_sol['P_sell'],
-            P_alkel, P_pemel, P_ammonia,
-            title=f'问题二(1): 最优调度方案 (氨产量={best[0]}t/d)',
-            save_path='q2_typical_optimal.png',
-            ind=best_ind,
+            P_alkel, P_pemel, P_ammonia, best_ind, best[0],
         )
     return results
 

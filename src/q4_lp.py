@@ -1,11 +1,14 @@
 import sys
 from pathlib import Path
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum, PULP_CBC_CMD, value
 from utils import (
     load_typical_load, load_wind_scenarios, load_solar_scenarios,
     compute_indicators, RESULTS_DIR, save_text_output, TeeStream,
-    get_price, FEED_IN_PRICE,
+    get_price, FEED_IN_PRICE, TOU_SCHEDULE,
 )
 
 T = 24
@@ -495,8 +498,116 @@ def compare_offgrid_ongrid(offgrid_results):
 # ========================================================================
 # Q4(2): 绘制典型场景调度
 # ========================================================================
+def plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si):
+    t = np.arange(T)
+    P_total_load = P_load + sol['P_alkel'] + sol['P_pemel'] + sol['P_ammonia']
+    P_total_gen = P_w + P_s
+    has_storage = storage_capacity > 0
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9))
+
+    # ── 图1: 负荷分解 ──
+    ax1 = axes[0, 0]
+    for tt in range(24):
+        p = TOU_SCHEDULE[tt]
+        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
+        ax1.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
+    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.6)
+    bottom = P_load.copy()
+    ax1.fill_between(t, bottom, bottom + sol['P_alkel'], label='ALKEL', color='#8963BA', alpha=0.5)
+    bottom += sol['P_alkel']
+    ax1.fill_between(t, bottom, bottom + sol['P_pemel'], label='PEMEL', color='#E56399', alpha=0.5)
+    bottom += sol['P_pemel']
+    ax1.fill_between(t, bottom, bottom + sol['P_ammonia'], label='合成氨', color='#7F7F7F', alpha=0.5)
+    ax1.plot(t, P_total_load, 'k-', linewidth=1.5, label='总负荷')
+    ax1.set_xlabel('时段 (h)')
+    ax1.set_ylabel('功率 (MW)')
+    ax1.set_title('图1: 负荷分解', fontsize=11, fontweight='bold')
+    ax1.set_xticks(t)
+    ax1.set_xticklabels([f'{h}:00' for h in t], rotation=45, fontsize=7)
+    ax1.grid(True, alpha=0.25, linestyle=':')
+    ax1.set_xlim(-0.5, 23.5)
+    ax1.legend(fontsize=7, ncol=2, loc='upper right')
+
+    # ── 图2: 发电分解 ──
+    ax2 = axes[0, 1]
+    for tt in range(24):
+        p = TOU_SCHEDULE[tt]
+        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
+        ax2.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
+    ax2.fill_between(t, 0, P_w, label='风电', color='#2E86AB', alpha=0.6)
+    ax2.fill_between(t, P_w, P_total_gen, label='光伏', color='#F18F01', alpha=0.6)
+    ax2.plot(t, P_total_gen, '--', color='#3B8C6E', linewidth=1.5, label='总发电')
+    ax2.set_xlabel('时段 (h)')
+    ax2.set_ylabel('功率 (MW)')
+    ax2.set_title('图2: 发电分解', fontsize=11, fontweight='bold')
+    ax2.set_xticks(t)
+    ax2.set_xticklabels([f'{h}:00' for h in t], rotation=45, fontsize=7)
+    ax2.grid(True, alpha=0.25, linestyle=':')
+    ax2.set_xlim(-0.5, 23.5)
+    ax2.legend(fontsize=7, loc='upper right')
+
+    # ── 图3: 供需对比 + 弃电 ──
+    ax3 = axes[1, 0]
+    for tt in range(24):
+        p = TOU_SCHEDULE[tt]
+        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
+        ax3.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
+    # With storage: net load = load + charge - discharge
+    if has_storage:
+        P_net_re = P_w + P_s + sol['P_discharge'] - sol['P_charge']
+        net_label = '总发电+放电-充电'
+    else:
+        P_net_re = P_total_gen
+        net_label = '总发电'
+    ax3.plot(t, P_total_load, 's-', color='#C73E1D', linewidth=2, markersize=4, label='总负荷')
+    ax3.plot(t, P_net_re, 'o-', color='#3B8C6E', linewidth=2, markersize=4, label=net_label)
+    # Curtailment area
+    curtail = sol['curtail']
+    ax3.fill_between(t, 0, curtail, where=(curtail > 0), color='orange', alpha=0.15, label='弃电')
+    ax3.set_xlabel('时段 (h)')
+    ax3.set_ylabel('功率 (MW)')
+    ax3.set_title('图3: 供需对比 (离网)', fontsize=11, fontweight='bold')
+    ax3.set_xticks(t)
+    ax3.set_xticklabels([f'{h}:00' for h in t], rotation=45, fontsize=7)
+    ax3.grid(True, alpha=0.25, linestyle=':')
+    ax3.set_xlim(-0.5, 23.5)
+    ax3.legend(fontsize=7, loc='upper right')
+
+    # ── 图4: 储能调度 (或弃电明细) ──
+    ax4 = axes[1, 1]
+    for tt in range(24):
+        p = TOU_SCHEDULE[tt]
+        c = 'red' if p == 'peak' else ('green' if p == 'flat' else 'none')
+        ax4.axvspan(tt - 0.5, tt + 0.5, color=c, alpha=0.06, lw=0)
+    if has_storage:
+        ax4.bar(t - 0.2, sol['P_charge'], width=0.35, color='#2E86AB', alpha=0.7, label='充电')
+        ax4.bar(t + 0.2, sol['P_discharge'], width=0.35, color='#C73E1D', alpha=0.7, label='放电')
+        ax4_twin = ax4.twinx()
+        ax4_twin.plot(t, sol['SOC'], 's-', color='#F18F01', linewidth=2, markersize=3, label='SOC')
+        ax4_twin.set_ylabel('SOC (MWh)', fontsize=10)
+        ax4_twin.legend(fontsize=7, loc='upper right')
+    else:
+        ax4.bar(t, sol['curtail'], width=0.6, color='orange', alpha=0.7, label='弃电')
+    ax4.set_xlabel('时段 (h)')
+    ax4.set_ylabel('功率 (MW)')
+    ax4.set_title('图4: 储能调度' if has_storage else '图4: 弃电', fontsize=11, fontweight='bold')
+    ax4.set_xticks(t)
+    ax4.set_xticklabels([f'{h}:00' for h in t], rotation=45, fontsize=7)
+    ax4.grid(True, alpha=0.25, linestyle=':')
+    ax4.set_xlim(-0.5, 23.5)
+    ax4.legend(fontsize=7, loc='upper left')
+
+    label = f"离网(储能{storage_capacity}MWh)" if has_storage else "离网(无储能)"
+    fig.suptitle(f'Q4: {label} (风{wi+1}光{si+1}, NH₃={res["NH3"]:.1f}t)', fontsize=14, fontweight='bold', y=1.02)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    path = str(RESULTS_DIR / f'q4_scn_{wi+1}_{si+1}_storage_{storage_capacity}.png')
+    fig.savefig(path, dpi=180, bbox_inches='tight', pad_inches=0.3)
+    plt.close(fig)
+    print(f"[Saved] {path}")
+
+
 def plot_typical_schedule(storage_capacity, max_curtail_key=None):
-    from utils import plot_power_curves
     P_load = load_typical_load()
     wind_scens = load_wind_scenarios()
     solar_scens = load_solar_scenarios()
@@ -517,15 +628,7 @@ def plot_typical_schedule(storage_capacity, max_curtail_key=None):
         return
 
     res = _calc_indicators(P_w, P_s, P_load, sol, storage_capacity)
-    label = f"离网(储能{storage_capacity}MWh)" if storage_capacity > 0 else "离网(无储能)"
-    plot_power_curves(
-        P_w, P_s, P_load,
-        np.zeros(T), np.zeros(T),
-        sol['P_alkel'], sol['P_pemel'], sol['P_ammonia'],
-        title=f'Q4: {label} (风{wi+1}光{si+1}, NH3={res["NH3"]:.1f}t)',
-        save_path=f'q4_scn_{wi+1}_{si+1}_storage_{storage_capacity}.png',
-        ind=res,
-    )
+    plot_q4_figures(P_w, P_s, P_load, sol, res, storage_capacity, wi, si)
 
 
 # ========================================================================
