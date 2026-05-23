@@ -45,7 +45,6 @@ def build_q4_lp(P_wind, P_solar, P_load,
     P_pemel = [LpVariable(f"pem_{t}", 0, RATED_PEMEL) for t in range(T)]
     P_ammonia = [LpVariable(f"am_{t}", 0, RATED_AMMONIA) for t in range(T)]
     P_curtail = [LpVariable(f"cur_{t}", 0) for t in range(T)]
-    H2_stock = [LpVariable(f"h2_{t}", 0) for t in range(T)]
 
     has_storage = storage_capacity > 0 and charge_max > 0
     if has_storage:
@@ -73,10 +72,7 @@ def build_q4_lp(P_wind, P_solar, P_load,
         h2p = (P_alkel[t] / RATED_ALKEL * H2_ALKEL_PER_HOUR
                + P_pemel[t] / RATED_PEMEL * H2_PEMEL_PER_HOUR)
         h2c = P_ammonia[t] / RATED_AMMONIA * NH3_PER_HOUR * H2_PER_TON_NH3
-        if t == 0:
-            prob += H2_stock[t] == h2p - h2c
-        else:
-            prob += H2_stock[t] == H2_stock[t - 1] + h2p - h2c
+        prob += h2p == h2c
 
     total_nh3 = lpSum(P_ammonia[t] / RATED_AMMONIA * NH3_PER_HOUR for t in range(T))
     if target_nh3 is not None:
@@ -94,7 +90,6 @@ def build_q4_lp(P_wind, P_solar, P_load,
         'P_pemel': _safe(P_pemel),
         'P_ammonia': _safe(P_ammonia),
         'curtail': _safe(P_curtail),
-        'H2_stock': _safe(H2_stock),
         'NH3_total': value(total_nh3) or 0,
         'SOC': _safe(SOC) if has_storage else np.zeros(T),
         'P_charge': _safe(P_charge) if has_storage else np.zeros(T),

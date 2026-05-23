@@ -21,22 +21,6 @@ H2_PER_TON_NH3 = 200
 
 PRODUCTION_LEVELS = [72, 63, 54, 45, 36]
 
-# Action table: 8 actions (ALKEL, PEMEL, NH3) ON/OFF.
-# Each entry: (x_alkel, x_pemel, x_ammonia, n_inc, h_inc)
-# n_inc = NH3 produced / 3.0 (quantized to integer 0 or 1)
-# h_inc = H2 produced / 40  (quantized, 280=7, 320=8, 600=15)
-
-H2_STEP = 40  # kg per H2 index unit
-
-ACTIONS = []
-for a in range(8):
-    xa = (a >> 2) & 1
-    xp = (a >> 1) & 1
-    xm = a & 1
-    n_inc = xm           # 3.0 t/h per NH3_PER_HOUR → index step
-    h_inc = int((xa * H2_ALKEL_PER_HOUR + xp * H2_PEMEL_PER_HOUR) // H2_STEP)
-    ACTIONS.append((xa, xp, xm, n_inc, h_inc))
-
 
 def _step_cost_and_bs(pw, ps, pl, xa, xp, xm, price):
     p_alkel = xa * RATED_ALKEL
@@ -57,106 +41,41 @@ def _step_cost_and_bs(pw, ps, pl, xa, xp, xm, price):
 
 def build_dp(P_wind, P_solar, P_load, target_nh3):
     N_MAX = int(target_nh3 // NH3_PER_HOUR)
-    H_TARGET = int(target_nh3 * H2_PER_TON_NH3 // H2_STEP)
-    H_MAX = H_TARGET + 15
 
-    INF = 1e20
-
-    # Precompute step cost and associated buy/sell for each (t, action)
-    step_cost = np.zeros((T, 8), dtype=np.float64)
-    buy_sell = np.zeros((T, 8, 2), dtype=np.float64)
+    info = []
     for t in range(T):
         pw, ps, pl = P_wind[t], P_solar[t], P_load[t]
         pr = get_price(t)
-        for a in range(8):
-            xa, xp, xm, _, _ = ACTIONS[a]
-            c, pb, ps_val = _step_cost_and_bs(pw, ps, pl, xa, xp, xm, pr)
-            step_cost[t, a] = c
-            buy_sell[t, a, 0] = pb
-            buy_sell[t, a, 1] = ps_val
+        c7, pb7, ps7 = _step_cost_and_bs(pw, ps, pl, 1, 1, 1, pr)
+        c0, pb0, ps0 = _step_cost_and_bs(pw, ps, pl, 0, 0, 0, pr)
+        info.append((c7 - c0, t, c7, pb7, ps7, c0, pb0, ps0))
 
-    # DP tables: store cost (float) as 2D rolling, prev (packed) as 3D
-    N_STATES = N_MAX + 1
-    H_STATES = H_MAX + 1
-    cost = np.full((N_STATES, H_STATES), INF, dtype=np.float64)
-    prev = np.zeros((T, N_STATES, H_STATES), dtype=np.int32)
+    info.sort(key=lambda x: x[0])
+    selected = set(t for _, t, _, _, _, _, _, _ in info[:N_MAX])
 
-    # t=0 initialization
-    for a in range(8):
-        _, _, _, ni, hi = ACTIONS[a]
-        if ni > N_MAX or hi > H_MAX:
-            continue
-        if step_cost[0, a] < cost[ni, hi]:
-            cost[ni, hi] = step_cost[0, a]
-            prev[0, ni, hi] = a  # pack: just action, prev_n=prev_h=0
-
-    # t = 1..23
-    for t in range(1, T):
-        new_cost = np.full((N_STATES, H_STATES), INF, dtype=np.float64)
-        new_prev = np.zeros((N_STATES, H_STATES), dtype=np.int32)
-        for a in range(8):
-            _, _, _, ni, hi = ACTIONS[a]
-            if ni > N_MAX or hi > H_MAX:
-                continue
-            step = step_cost[t, a]
-            # Slide over previous states
-            for n in range(N_STATES - ni):
-                for h in range(H_STATES - hi):
-                    prev_val = cost[n, h]
-                    if prev_val >= INF / 2:
-                        continue
-                    val = prev_val + step
-                    nn = n + ni
-                    hh = h + hi
-                    if val < new_cost[nn, hh]:
-                        new_cost[nn, hh] = val
-                        new_prev[nn, hh] = a | (n << 3) | (h << 8)
-        cost = new_cost
-        prev[t] = new_prev
-
-    # Extract optimal: min cost at N_MAX, H >= H_TARGET
-    best_cost = INF
-    best_h = -1
-    for h in range(H_TARGET, H_STATES):
-        if cost[N_MAX, h] < best_cost:
-            best_cost = cost[N_MAX, h]
-            best_h = h
-
-    if best_cost >= INF / 2:
-        return {'status': -1, 'obj': best_cost}
-
-    # Backtrack to get schedule
     x_alkel = np.zeros(T, dtype=int)
     x_pemel = np.zeros(T, dtype=int)
     x_ammonia = np.zeros(T, dtype=int)
     P_buy = np.zeros(T)
     P_sell = np.zeros(T)
+    total_cost = 0.0
 
-    cn, ch = N_MAX, best_h
-    for t in reversed(range(T)):
-        packed = prev[t, cn, ch]
-        if t == 0:
-            a = packed
+    lookup = {t: (c7, pb7, ps7, c0, pb0, ps0) for _, t, c7, pb7, ps7, c0, pb0, ps0 in info}
+
+    for t in range(T):
+        c7, pb7, ps7, c0, pb0, ps0 = lookup[t]
+        if t in selected:
+            x_alkel[t] = x_pemel[t] = x_ammonia[t] = 1
+            P_buy[t], P_sell[t] = pb7, ps7
+            total_cost += c7
         else:
-            a = packed & 0x7
-            cn = (packed >> 3) & 0x1F
-            ch = (packed >> 8) & 0x3FF
-
-        xa, xp, xm, _, _ = ACTIONS[a]
-        x_alkel[t] = xa
-        x_pemel[t] = xp
-        x_ammonia[t] = xm
-        P_buy[t] = buy_sell[t, a, 0]
-        P_sell[t] = buy_sell[t, a, 1]
+            P_buy[t], P_sell[t] = pb0, ps0
+            total_cost += c0
 
     return {
         'status': 1,
-        'x_alkel': x_alkel,
-        'x_pemel': x_pemel,
-        'x_ammonia': x_ammonia,
-        'P_buy': P_buy,
-        'P_sell': P_sell,
-        'obj': best_cost,
+        'x_alkel': x_alkel, 'x_pemel': x_pemel, 'x_ammonia': x_ammonia,
+        'P_buy': P_buy, 'P_sell': P_sell, 'obj': total_cost,
     }
 
 

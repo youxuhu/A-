@@ -33,7 +33,6 @@ def build_lp(P_wind: np.ndarray, P_solar: np.ndarray,
     P_buy = [LpVariable(f"P_buy_{t}", lowBound=0, upBound=max_demand) for t in range(T)]
     P_sell = [LpVariable(f"P_sell_{t}", lowBound=0,
                          upBound=P_wind[t] + P_solar[t]) for t in range(T)]
-    H2_stock = [LpVariable(f"H2_stock_{t}", lowBound=0) for t in range(T)]
 
     for t in range(T):
         gen = P_wind[t] + P_solar[t] + P_buy[t]
@@ -44,17 +43,10 @@ def build_lp(P_wind: np.ndarray, P_solar: np.ndarray,
         h2_prod = (P_alkel[t] / RATED_ALKEL * H2_ALKEL_PER_HOUR
                    + P_pemel[t] / RATED_PEMEL * H2_PEMEL_PER_HOUR)
         nh3_h2 = P_ammonia[t] / RATED_AMMONIA * NH3_PER_HOUR * H2_PER_TON_NH3
-        if t == 0:
-            prob += H2_stock[t] == h2_prod - nh3_h2, f"h2_balance_{t}"
-        else:
-            prob += (H2_stock[t] == H2_stock[t - 1] + h2_prod - nh3_h2), f"h2_balance_{t}"
+        prob += h2_prod == nh3_h2, f"h2_per_hour_{t}"
 
     prob += lpSum(P_ammonia[t] / RATED_AMMONIA * NH3_PER_HOUR
                   for t in range(T)) == target_nh3, "nh3_target"
-    total_h2 = lpSum(P_alkel[t] / RATED_ALKEL * H2_ALKEL_PER_HOUR
-                     + P_pemel[t] / RATED_PEMEL * H2_PEMEL_PER_HOUR
-                     for t in range(T))
-    prob += total_h2 >= target_nh3 * H2_PER_TON_NH3, "h2_total"
 
     revenue = lpSum(P_sell[t] * 1000 * 0.3779 for t in range(T))
     cost_buy = lpSum(P_buy[t] * 1000 * get_price(t) for t in range(T))
@@ -77,7 +69,6 @@ def build_lp(P_wind: np.ndarray, P_solar: np.ndarray,
         'P_ammonia': ammonia,
         'P_buy': np.array([v.varValue or 0 for v in P_buy]),
         'P_sell': np.array([v.varValue or 0 for v in P_sell]),
-        'H2_stock': np.array([v.varValue or 0 for v in H2_stock]),
         'obj': prob.objective.value(),
     }
 
