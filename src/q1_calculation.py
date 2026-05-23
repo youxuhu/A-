@@ -46,45 +46,44 @@ def plot_q1_figures(P_wind, P_solar, P_load, P_buy, P_sell,
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 9))
 
-    # ── 图1: 负荷分解 ──
+    # ── 图1: 负荷分解 (常数设备) ──
     ax1 = axes[0, 0]
-    _shade_price(ax1)
-    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.6)
-    ax1.fill_between(t, P_load, P_load + P_alkel + P_pemel, label='电解槽 (ALKEL+PEMEL)', color='#8963BA', alpha=0.5)
-    ax1.fill_between(t, P_load + P_alkel + P_pemel, P_total_load, label='合成氨', color='#7F7F7F', alpha=0.5)
+    ax1.fill_between(t, 0, P_load, label='常规电负荷', color='#333333', alpha=0.5)
+    ax1.fill_between(t, P_load, P_load + P_alkel + P_pemel, label='电解槽 (ALKEL+PEMEL)', color='#8963BA', alpha=0.4)
+    ax1.fill_between(t, P_load + P_alkel + P_pemel, P_total_load, label='合成氨', color='#7F7F7F', alpha=0.4)
     ax1.plot(t, P_total_load, 'k-', linewidth=1.5, label='总负荷')
-    for val, name, color in [(10, 'ALKEL 10MW', '#8963BA'), (10, 'PEMEL 10MW', '#E56399'), (0.75, 'NH₃ 0.75MW', '#7F7F7F')]:
-        pass
-    ax1.text(23.2, P_load.mean(), f'ALKEL={10:.0f}MW\nPEMEL={10:.0f}MW\nNH₃={0.75:.2f}MW',
-             fontsize=7, va='center', ha='left', color='#555555')
+    ax1.axhline(y=10, xmin=0, xmax=1, color='#8963BA', linestyle=':', linewidth=0.8, alpha=0.7)
+    ax1.axhline(y=20, xmin=0, xmax=1, color='#E56399', linestyle=':', linewidth=0.8, alpha=0.7)
+    ax1.axhline(y=20.75, xmin=0, xmax=1, color='#7F7F7F', linestyle=':', linewidth=0.8, alpha=0.7)
+    ax1.text(23.5, 10, 'ALKEL 10MW', fontsize=7, va='center', color='#8963BA', alpha=0.8)
+    ax1.text(23.5, 20, 'PEMEL 10MW', fontsize=7, va='center', color='#E56399', alpha=0.8)
+    ax1.text(23.5, 20.75, 'NH₃ 0.75MW', fontsize=7, va='bottom', color='#7F7F7F', alpha=0.8)
     _finish_ax(ax1, '功率 (MW)', '图1: 负荷分解 (耗电侧)')
     ax1.legend(fontsize=7, ncol=2, loc='upper right')
 
-    # ── 图2: 发电分解 ──
+    # ── 图2: 发电分解 (独立曲线) ──
     ax2 = axes[0, 1]
-    _shade_price(ax2)
-    ax2.fill_between(t, 0, P_wind, label='风电', color='#2E86AB', alpha=0.6)
-    ax2.fill_between(t, P_wind, P_total_gen, label='光伏', color='#F18F01', alpha=0.6)
-    ax2.plot(t, P_total_gen, '--', color='#3B8C6E', linewidth=1.5, label='总发电')
+    ax2.fill_between(t, 0, P_wind, color='#2E86AB', alpha=0.12)
+    ax2.fill_between(t, 0, P_solar, color='#F18F01', alpha=0.12)
+    ax2.plot(t, P_wind, 'o-', color='#2E86AB', linewidth=1.5, markersize=4, label='风电')
+    ax2.plot(t, P_solar, 's-', color='#F18F01', linewidth=1.5, markersize=4, label='光伏')
+    ax2.plot(t, P_total_gen, '^--', color='#C73E1D', linewidth=2, markersize=5, label='总发电')
     _finish_ax(ax2, '功率 (MW)', '图2: 发电分解 (产电侧)')
     ax2.legend(fontsize=7, loc='upper right')
 
     # ── 图3: 供需对比 ──
     ax3 = axes[1, 0]
-    _shade_price(ax3)
     ax3.plot(t, P_total_load, 's-', color='#C73E1D', linewidth=2, markersize=4, label='总负荷')
     ax3.plot(t, P_total_gen, 'o-', color='#3B8C6E', linewidth=2, markersize=4, label='总发电')
-    # Shade deficit/surplus
     deficit = np.maximum(0, P_total_load - P_total_gen)
     surplus = np.maximum(0, P_total_gen - P_total_load)
-    ax3.fill_between(t, 0, deficit, where=(deficit > 0), color='red', alpha=0.12, label='缺电')
-    ax3.fill_between(t, P_total_gen, P_total_load, where=(surplus > 0), color='green', alpha=0.12, label='余电')
+    ax3.fill_between(t, 0, deficit, where=(deficit > 0), color='red', alpha=0.15, label='缺电')
+    ax3.fill_between(t, 0, surplus, where=(surplus > 0), color='green', alpha=0.15, label='余电')
     _finish_ax(ax3, '功率 (MW)', '图3: 总负荷 vs 总发电 (供需对比)')
     ax3.legend(fontsize=7, loc='upper right')
 
     # ── 图4: 购电与售电 ──
     ax4 = axes[1, 1]
-    _shade_price(ax4)
     ax4.bar(t - 0.15, P_buy, width=0.3, color='#E56399', alpha=0.8, label='购电')
     ax4.bar(t + 0.15, P_sell, width=0.3, color='#88CC88', alpha=0.8, label='售电')
     _finish_ax(ax4, '功率 (MW)', '图4: 购电与售电功率')

@@ -116,52 +116,90 @@ $$c_{ton} = \frac{C_{total}}{Q_{NH3}},\quad Q_{NH3} = 36\ \text{t}$$
 
 ---
 
-## 3. 问题二：离散 ON/OFF 调度 (MILP)
+## 3. 问题二：离散 ON/OFF 调度 (DP)
 
 ### 3.1 问题描述
 
-产能 2×（72 t/d 上限），设备只能全额开机或停机。产量从 72 t/d 按 9 t/d 递减至 36 t/d。在典型场景和 24 种风光场景下寻找成本最低的时段安排。
+产能 2×（72 t/d 上限），设备只能全额开机或停机。产量从 72 t/d 按 9 t/d 递减至 36 t/d。在典型场景和 24 种风光场景下寻找成本最低的时段安排。使用 **动态规划（DP）** 求解。
 
-### 3.2 决策变量
+### 3.2 DP 状态设计
 
-$$x_{ALKEL}(t), x_{PEMEL}(t), x_{NH3}(t) \in \{0, 1\},\quad t = 0,\dots,23$$
+| 维度 | 含义 | 量化步长 | 级数 |
+|------|------|---------|------|
+| $t$ | 时段 $0,\dots,23$ | — | 24 |
+| $n$ | 累计 NH$_3$ 产量 | $3.0$ t/h | $N_{max}+1$ |
+| $h$ | 累计 H$_2$ 产量 | $40$ kg/h | $H_{max}+1$ |
 
-$$P_{buy}(t) \ge 0, \quad P_{sell}(t) \ge 0$$
+其中 $N_{max} = Q_{target} / 3.0$，$H_{target} = Q_{target} \times 200 / 40$，$H_{max} = H_{target} + 15$。
 
-### 3.3 约束
+### 3.3 动作空间（每小时 8 种）
 
-**功率平衡：**
+| 动作 | $x_{ALKEL}$ | $x_{PEMEL}$ | $x_{NH3}$ | $\Delta n$ | $\Delta h$ |
+|------|:-----------:|:-----------:|:---------:|:----------:|:----------:|
+| 0 | 0 | 0 | 0 | 0 | 0 |
+| 1 | 0 | 0 | 1 | 1 | 0 |
+| 2 | 0 | 1 | 0 | 0 | 8 |
+| 3 | 0 | 1 | 1 | 1 | 8 |
+| 4 | 1 | 0 | 0 | 0 | 7 |
+| 5 | 1 | 0 | 1 | 1 | 7 |
+| 6 | 1 | 1 | 0 | 0 | 15 |
+| 7 | 1 | 1 | 1 | 1 | 15 |
 
-$$P_{wind}(t) + P_{solar}(t) + P_{buy}(t) = P_{load}(t) + P_{ALKEL}^{max}x_{ALKEL}(t) + P_{PEMEL}^{max}x_{PEMEL}(t) + P_{NH3}^{max}x_{NH3}(t) + P_{sell}(t)$$
+$\Delta h$ 的单位为 H$_2$ 索引（40 kg/索引）：
 
-**制氨产量目标：**
+$$280\ \text{kg/h} \div 40 = 7,\quad 320 \div 40 = 8,\quad 600 \div 40 = 15$$
 
-$$\sum_t x_{NH3}(t) \cdot r_{NH3} = Q_{target},\quad Q_{target} \in \{72, 63, 54, 45, 36\}$$
+### 3.4 DP 递推式
 
-**氢气总量约束（无逐时存储）：**
+**阶段成本（动作 $a$ 在时段 $t$ 的最小运营成本）：**
 
-$$\sum_t \big[x_{ALKEL}(t) \cdot r_{ALKEL}^{H2} + x_{PEMEL}(t) \cdot r_{PEMEL}^{H2}\big] \ge Q_{target} \cdot k_{H2}$$
+给定动作 $a$，设备功率固定为 $P_{ALKEL}=20x_a$, $P_{PEMEL}=20x_p$, $P_{NH3}=1.5x_m$。净平衡：
 
-**购售电上限：**
+$$\Delta(t) = P_{wind}(t) + P_{solar}(t) - P_{load}(t) - P_{ALKEL} - P_{PEMEL} - P_{NH3}$$
 
-$$0 \le P_{buy}(t) \le P_{load}^{max} + P_{ALKEL}^{max} + P_{PEMEL}^{max} + P_{NH3}^{max}$$
-$$0 \le P_{sell}(t) \le P_{wind}(t) + P_{solar}(t)$$
+最优购售电量（考虑分时电价套利）：
 
-### 3.4 目标函数
+$$
+P_{sell}^{max} = P_{wind} + P_{solar}
+$$
 
-$$\min \sum_t \Big[ P_{buy}(t) \times 1000 \times \pi(t) - P_{sell}(t) \times 1000 \times 0.3779 \Big] + C_{ope}$$
+$$
+(P_{buy}, P_{sell}) =
+\begin{cases}
+(0, \Delta) & \Delta \ge 0 \\
+(|\Delta| + P_{sell}^{max}, P_{sell}^{max}) & \Delta < 0,\ \pi(t) < 0.3779 \\
+(|\Delta|, 0) & \Delta < 0,\ \pi(t) \ge 0.3779
+\end{cases}
+$$
 
-其中运维费用：
+当 $\Delta < 0$ 且 $\pi(t) < 0.3779$ 时（谷时），购电成本低于上网电价，存在**套利空间**：买入全部风光发电并按上网电价卖出。
 
-$$C_{ope} = \sum_t \big[ P_{ALKEL}^{max}x_{ALKEL}(t) \times 100 + P_{PEMEL}^{max}x_{PEMEL}(t) \times 150 + P_{NH3}^{max}x_{NH3}(t) \times 2 \big]$$
+阶段成本：
 
-设备折旧在 MILP 目标函数中不计（固定成本不影响调度决策），在指标计算的 `compute_indicators` 后处理中加入。
+$$c_t(a) = P_{buy} \times 1000 \times \pi(t) - P_{sell} \times 1000 \times 0.3779 + 20x_a \times 100 + 20x_p \times 150 + 1.5x_m \times 2$$
 
-### 3.5 求解方法
+**状态转移（$t > 0$）：**
 
-- 求解器：CBC MILP（分支定界法）
-- 对 24 场景 × 5 产量 = 120 个 MILP 分别求解
-- 每个场景选择吨氨成本最低的产量作为该场景最优方案
+$$dp[t][n][h] = \min_{a \in \{0..7\}} \big[ dp[t-1][n-\Delta n_a][h-\Delta h_a] + c_t(a) \big]$$
+
+**初值（$t = 0$）：**
+
+$$dp[0][\Delta n_a][\Delta h_a] = c_0(a),\quad \forall a$$
+
+### 3.5 最优解提取
+
+$$cost^* = \min_{h \ge H_{target}} dp[23][N_{max}][h]$$
+
+回溯 `prev[t][n][h]` 表得到逐时 ON/OFF 调度方案。
+
+### 3.6 DP vs MILP 等价性
+
+| 维度 | MILP | DP |
+|------|------|----|
+| 解空间 | 72 Binary 变量 | 24 步 × 8 动作 |
+| 全局最优 | ✓（分支定界） | ✓（枚举所有可达状态） |
+| 计算时间（120 问题） | ~40 秒 | **< 1 秒** |
+| 外部依赖 | pulp + CBC | 纯 numpy
 
 ---
 
