@@ -52,12 +52,6 @@ def plot_q1_figures(P_wind, P_solar, P_load, P_buy, P_sell,
     ax1.fill_between(t, P_load, P_load + P_alkel + P_pemel, label='电解槽 (ALKEL+PEMEL)', color='#8963BA', alpha=0.4)
     ax1.fill_between(t, P_load + P_alkel + P_pemel, P_total_load, label='合成氨', color='#7F7F7F', alpha=0.4)
     ax1.plot(t, P_total_load, 'k-', linewidth=1.5, label='总负荷')
-    ax1.axhline(y=10, xmin=0, xmax=1, color='#8963BA', linestyle=':', linewidth=0.8, alpha=0.7)
-    ax1.axhline(y=20, xmin=0, xmax=1, color='#E56399', linestyle=':', linewidth=0.8, alpha=0.7)
-    ax1.axhline(y=20.75, xmin=0, xmax=1, color='#7F7F7F', linestyle=':', linewidth=0.8, alpha=0.7)
-    ax1.text(23.5, 10, 'ALKEL 10MW', fontsize=7, va='center', color='#8963BA', alpha=0.8)
-    ax1.text(23.5, 20, 'PEMEL 10MW', fontsize=7, va='center', color='#E56399', alpha=0.8)
-    ax1.text(23.5, 20.75, 'NH₃ 0.75MW', fontsize=7, va='bottom', color='#7F7F7F', alpha=0.8)
     _finish_ax(ax1, '功率 (MW)', '图1: 负荷分解 (耗电侧)')
     ax1.legend(fontsize=7, ncol=2, loc='upper right')
 
@@ -175,8 +169,39 @@ def solve_q1():
     # ── 绘图 ──
     plot_q1_figures(P_wind, P_solar, P_load, P_buy, P_sell,
                     P_alkel, P_pemel, P_ammonia, ind)
+    plot_q1_indicators(ind)
 
     return ind
+
+
+def plot_q1_indicators(ind):
+    fig, axes = plt.subplots(1, 3, figsize=(12, 2.5))
+    items = [
+        ('新能源自发自用率 $\\eta_{self}$', ind['eta_self'] * 100, 60, '>'),
+        ('总用电量绿电比例 $\\eta_{green}$', ind['eta_green'] * 100, 30, '>'),
+        ('新能源上网电量比例 $\\eta_{sell}$', ind['eta_sell'] * 100, 20, '<'),
+    ]
+    for ax, (name, val, thresh, direction) in zip(axes, items):
+        passed = (val > thresh) if direction == '>' else (val < thresh)
+        color = '#3B8C6E' if passed else '#C73E1D'
+        ax.barh(0, 100, color='gray', alpha=0.25, height=0.7, label='100%')
+        ax.barh(0, min(val, 100), color=color, alpha=0.85, height=0.7)
+        ax.axvline(thresh, color='black', linestyle='--', linewidth=1.5)
+        ax.text(thresh, 0.6, f'{thresh}%', ha='center', fontsize=8,
+                bbox=dict(facecolor='white', edgecolor='none', pad=1))
+        ax.set_xlim(0, 100)
+        ax.set_ylim(-0.8, 0.8)
+        ax.set_yticks([])
+        ax.set_title(f'{name}\n{val:.1f}%',
+                     fontsize=10, color='#333333')
+        ax.set_xlabel('比例 (%)' if ax == axes[-1] else '', fontsize=8)
+        ax.tick_params(labelsize=7)
+    fig.suptitle('绿电直连指标达标情况（问题一 满负荷运行）', fontsize=13, y=1.08)
+    fig.tight_layout()
+    path = str(RESULTS_DIR / 'q1_green_indicators.png')
+    fig.savefig(path, dpi=180, bbox_inches='tight', pad_inches=0.3)
+    plt.close(fig)
+    print(f"[Saved] {path}")
 
 
 if __name__ == '__main__':

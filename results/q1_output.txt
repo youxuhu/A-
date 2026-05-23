@@ -40,3 +40,4 @@
     上网电量 217 MWh / 新能源发电 603 MWh
     午间光伏大发时段负荷消纳能力不足
 [Saved] /home/revy/A题/results/q1_power_curves_4panel.png
+[Saved] /home/revy/A题/results/q1_green_indicators.png
