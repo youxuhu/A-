@@ -84,7 +84,7 @@ def fig_q2_bar_cost():
     ax.set_xticklabels([f'{t} t/d' for t in PRODUCTION_LEVELS])
     ax.set_xlabel('日产量', fontsize=12)
     ax.set_ylabel('吨氨成本 (¥/t)', fontsize=12)
-    ax.set_title('不同日产量下吨氨成本对比（典型场景）', fontsize=13, fontweight='bold')
+    ax.set_title('【Q2(1)】不同日产量下吨氨成本对比（典型场景）', fontsize=13, fontweight='bold')
     ax.grid(axis='y', alpha=0.25, linestyle=':')
     best_idx = np.argmin(costs)
     ax.annotate(f'最优\n{costs[best_idx]:.0f} ¥/t',
@@ -117,7 +117,7 @@ def fig_q2_delta_sorted(P_w, P_s, P_l):
     ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
     ax.set_xlabel('时段 (h)', fontsize=12)
     ax.set_ylabel('边际成本 ΔC(t) (¥)', fontsize=12)
-    ax.set_title('典型场景下各小时成本增量排序', fontsize=13, fontweight='bold')
+    ax.set_title('【Q2(1)】典型场景下各小时成本增量排序', fontsize=13, fontweight='bold')
     ax.set_xticks(range(24))
     ax.set_xticklabels([f'{h}:00' for h in range(24)], rotation=45, fontsize=7)
     ax.grid(True, alpha=0.2, linestyle=':')
@@ -154,7 +154,7 @@ def fig_q2_heatmap(P_w, P_s, P_l):
     ax.set_xlim(0, 24)
     ax.set_ylim(0, 5)
     ax.set_xlabel('时段', fontsize=11)
-    ax.set_title('不同日产量下的最优开机时段分布', fontsize=13, fontweight='bold')
+    ax.set_title('【Q2(1)】不同日产量下的最优开机时段分布', fontsize=13, fontweight='bold')
     legend_elements = [Patch(facecolor='#B22222', label='开机'),
                        Patch(facecolor='#FFF8DC', label='停机')]
     ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
@@ -165,17 +165,55 @@ def fig_q2_heatmap(P_w, P_s, P_l):
     print('[Saved] results/q2_heatmap.png')
 
 
+def _run_24_scenarios():
+    """Run 24 scenarios, return {target: [costs_list]} and {target: annual_stats}."""
+    P_load = load_typical_load()
+    wind_scens = load_wind_scenarios()
+    solar_scens = load_solar_scenarios()
+    all_costs = {t: [] for t in PRODUCTION_LEVELS}
+    all_indicators = {t: {'eta_self': [], 'eta_green': [], 'eta_sell': []} for t in PRODUCTION_LEVELS}
+
+    from utils import compute_indicators
+    for wi in range(6):
+        for si in range(4):
+            P_w = wind_scens[:, wi]
+            P_s = solar_scens[:, si]
+            for target in PRODUCTION_LEVELS:
+                sol = build_dp(P_w, P_s, P_load, target)
+                if sol['status'] != 1:
+                    continue
+                P_alkel = sol['x_alkel'] * RATED_ALKEL
+                P_pemel = sol['x_pemel'] * RATED_PEMEL
+                P_ammonia = sol['x_ammonia'] * RATED_AMMONIA
+                ind = compute_indicators(P_w, P_s, sol['P_buy'], sol['P_sell'],
+                                         P_load, P_alkel, P_pemel, P_ammonia,
+                                         NH3_total=target,
+                                         capacity_factor=CAPACITY_FACTOR,
+                                         include_depreciation=False)
+                all_costs[target].append(ind['ton_cost'])
+                all_indicators[target]['eta_self'].append(ind['eta_self'])
+                all_indicators[target]['eta_green'].append(ind['eta_green'])
+                all_indicators[target]['eta_sell'].append(ind['eta_sell'])
+
+    annual_stats = {}
+    for t in PRODUCTION_LEVELS:
+        c = np.array(all_costs[t])
+        if len(c) > 0:
+            annual_stats[t] = {
+                'mean': c.mean(), 'min': c.min(), 'max': c.max(),
+                'p25': np.percentile(c, 25), 'p75': np.percentile(c, 75),
+                'std': c.std(),
+            }
+    return all_costs, annual_stats
+
+
 # ═══════════════════════════════════════════════════════
-# Q2 图4: 24场景吨氨成本箱线图
+# Q2 【Q2(2)】图4: 24场景吨氨成本箱线图
 # ═══════════════════════════════════════════════════════
 
-def fig_q2_boxplot():
-    all_data = {t: [] for t in PRODUCTION_LEVELS}
-    for i, target in enumerate(PRODUCTION_LEVELS):
-        all_data[target] = [USER_COSTS[i]] * 24
-
+def fig_q2_boxplot(all_costs):
     fig, ax = plt.subplots(figsize=(8, 3.8))
-    data = [all_data[t] for t in PRODUCTION_LEVELS]
+    data = [all_costs[t] for t in PRODUCTION_LEVELS]
     bp = ax.boxplot(data, tick_labels=[f'{t} t/d' for t in PRODUCTION_LEVELS],
                     patch_artist=True, widths=0.5)
     colors = ['#2E86AB', '#3B8C6E', '#F18F01', '#E56399', '#8963BA']
@@ -187,19 +225,16 @@ def fig_q2_boxplot():
         median.set_linewidth(2)
     ax.set_xlabel('日产量', fontsize=12)
     ax.set_ylabel('吨氨成本 (¥/t)', fontsize=12)
-    ax.set_title('24种风光场景下吨氨成本分布', fontsize=13, fontweight='bold')
+    ax.set_title('【Q2(2)】24种风光场景下吨氨成本分布', fontsize=13, fontweight='bold')
     ax.grid(axis='y', alpha=0.2, linestyle=':')
     fig.tight_layout()
     fig.savefig(OUT / 'q2_boxplot.png', dpi=200, bbox_inches='tight')
     plt.close(fig)
     print('[Saved] results/q2_boxplot.png')
 
-    # Also return data for table use
-    return all_data
-
 
 # ═══════════════════════════════════════════════════════
-# Q2 图5: 绿电指标满足情况堆积柱状图
+# Q2 【Q2(2)】图5: 绿电指标满足情况堆积柱状图
 # ═══════════════════════════════════════════════════════
 
 def fig_q2_indicator_stacked():
@@ -222,7 +257,7 @@ def fig_q2_indicator_stacked():
     ax.set_xticklabels([f'{t} t/d' for t in PRODUCTION_LEVELS])
     ax.set_xlabel('日产量', fontsize=12)
     ax.set_ylabel('场景数', fontsize=12)
-    ax.set_title('不同日产量下绿电指标达标情况（24场景）', fontsize=13, fontweight='bold')
+    ax.set_title('【Q2(2)】不同日产量下绿电指标达标情况（24场景）', fontsize=13, fontweight='bold')
     ax.legend(fontsize=9, loc='upper right')
     ax.set_ylim(0, 28)
     ax.grid(axis='y', alpha=0.2, linestyle=':')
@@ -285,8 +320,8 @@ def export_tables():
     lines.append('')
 
     # ── Q2 tables ──
-    lines.append('## Q2 典型场景结果\n')
-    lines.append('### 表4: 各产量最优调度结果\n')
+    lines.append('## Q2 结果\n')
+    lines.append('### 【Q2(1)】表4: 典型场景各产量最优调度结果\n')
     lines.append('| 日产量(t) | 开机小时 | 吨氨成本(¥/t) | $\\eta_{self}$ | $\\eta_{green}$ | $\\eta_{sell}$ |')
     lines.append('|-----------|---------|-------------|:-------------:|:--------------:|:------------:|')
     for i, target in enumerate(PRODUCTION_LEVELS):
@@ -295,38 +330,37 @@ def export_tables():
         e1, e2, e3 = USER_INDICATORS[i]
         lines.append(f'| {target} | {h}h | {cost:.2f} | {e1:.2f}% | {e2:.2f}% | {e3:.2f}% |')
     lines.append('')
-
     lines.append(f'**最优日产量**: 36 t/d\n')
     lines.append('')
 
-    lines.append('### 表5: 全年绿电指标统计\n')
-    lines.append('| 分类 | 天数 | 占比 |')
-    lines.append('|------|------|------|')
-    # Read from q2 output
-    lines.append('| 全满足 | 0 | 0.0% |')
-    lines.append('| 部分满足 | 315 | 87.5% |')
-    lines.append('| 全不满足 | 45 | 12.5% |')
-    lines.append('')
+    # Recompute 24-scenario stats
+    all_costs, annual_stats = _run_24_scenarios()
 
-    lines.append('### 表6: 全年吨氨成本分布\n')
-    lines.append('| 统计量 | 值 (¥/t) |')
-    lines.append('|--------|----------|')
-    lines.append('| 均值 | 3968.94 |')
-    lines.append('| 最小值 | -718.85 |')
-    lines.append('| 最大值 | 7862.76 |')
-    lines.append('| P25 | 1888.91 |')
-    lines.append('| P75 | 5996.40 |')
-    lines.append('')
-
-    lines.append('### 表7: 24场景离散制氨绿电指标统计\n')
-    lines.append('| 产量 (t/d) | 全满足 | 部分满足 | 全不满足 | 平均成本 (¥/t) |')
-    lines.append('|:----------:|:------:|:--------:|:--------:|:--------------:|')
+    lines.append('### 【Q2(2)】表5: 24场景绿电指标统计与成本分布\n')
+    lines.append('**（a）绿电指标达标情况**\n')
+    lines.append('| 产量 (t/d) | 全满足 | 部分满足 | 全不满足 | 24场景平均成本 (¥/t) |')
+    lines.append('|:----------:|:------:|:--------:|:--------:|:--------------------:|')
     for i, target in enumerate(PRODUCTION_LEVELS):
         a, b, c = USER_GREEN_COUNTS[i]
-        lines.append(f'| {target} | {a} | {b} | {c} | {USER_COSTS[i]:.2f} |')
+        avg_cost = annual_stats[target]['mean'] if target in annual_stats else USER_COSTS[i]
+        lines.append(f'| {target} | {a} | {b} | {c} | {avg_cost:.2f} |')
     lines.append('')
-    lines.append('**说明**：产量越高，全满足绿电指标的场景数越多，但吨氨平均成本也越高。')
-    lines.append('成本标准差随产量降低而增大，反映低产量场景下成本波动更大。\n')\
+    lines.append('**（b）全年吨氨成本分布**\n')
+    lines.append('| 统计量 | 值 (¥/t) |')
+    lines.append('|--------|----------|')
+    all_vals = []
+    for t in PRODUCTION_LEVELS:
+        all_vals.extend(all_costs[t])
+    all_vals = np.array(all_vals)
+    lines.append(f'| 均值 | {all_vals.mean():.2f} |')
+    lines.append(f'| 标准差 | {all_vals.std():.2f} |')
+    lines.append(f'| 最小值 | {all_vals.min():.2f} |')
+    lines.append(f'| 最大值 | {all_vals.max():.2f} |')
+    lines.append(f'| P25 | {np.percentile(all_vals, 25):.2f} |')
+    lines.append(f'| P75 | {np.percentile(all_vals, 75):.2f} |')
+    lines.append('')
+    lines.append('**说明**：产量越高，全满足绿电指标的场景数越多，但平均成本也越高。')
+    lines.append('成本标准差随产量降低而增大，反映低产量场景下成本波动更大。\n')
 
     text = '\n'.join(lines)
     (OUT / 'paper_tables.md').write_text(text, encoding='utf-8')
@@ -347,6 +381,9 @@ if __name__ == '__main__':
     print('Generating Q2 figures...')
     print('=' * 50)
 
+    print('  (computing 24 scenarios... this takes ~5s)')
+    all_costs, annual_stats = _run_24_scenarios()
+
     # Fig 1: Bar chart
     fig_q2_bar_cost()
 
@@ -357,11 +394,9 @@ if __name__ == '__main__':
     fig_q2_heatmap(P_w, P_s, P_load)
 
     # Fig 4: Boxplot
-    print('  (computing 24 scenarios for boxplot... this takes ~5s)')
-    fig_q2_boxplot()
+    fig_q2_boxplot(all_costs)
 
     # Fig 5: Stacked bar
-    print('  (computing 24 scenarios for indicator stats...)')
     fig_q2_indicator_stacked()
 
     # Export tables
@@ -372,4 +407,5 @@ if __name__ == '__main__':
     export_tables()
 
     print()
+    print('Done! All figures saved to results/')
     print('Done! All figures saved to results/')
