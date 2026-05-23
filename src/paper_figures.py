@@ -318,6 +318,16 @@ def export_tables():
     lines.append('| P75 | 5996.40 |')
     lines.append('')
 
+    lines.append('### 表7: 24场景离散制氨绿电指标统计\n')
+    lines.append('| 产量 (t/d) | 全满足 | 部分满足 | 全不满足 | 平均成本 (¥/t) |')
+    lines.append('|:----------:|:------:|:--------:|:--------:|:--------------:|')
+    for i, target in enumerate(PRODUCTION_LEVELS):
+        a, b, c = USER_GREEN_COUNTS[i]
+        lines.append(f'| {target} | {a} | {b} | {c} | {USER_COSTS[i]:.2f} |')
+    lines.append('')
+    lines.append('**说明**：产量越高，全满足绿电指标的场景数越多，但吨氨平均成本也越高。')
+    lines.append('成本标准差随产量降低而增大，反映低产量场景下成本波动更大。\n')\
+
     text = '\n'.join(lines)
     (OUT / 'paper_tables.md').write_text(text, encoding='utf-8')
     print('[Saved] results/paper_tables.md')
